@@ -13,6 +13,149 @@ from robot.libraries.BuiltIn import BuiltIn
 from SnowLibrary.exceptions import QueryNotExecuted
 
 
+class Singleton:
+    def __init__(self, cls):
+        self._cls = cls
+
+    def Instance(self, **kwargs):
+        try:
+            return self._instance
+        except AttributeError:
+            self._instance = self._cls(**kwargs)
+            return self._instance
+
+    def __call__(self):
+        raise TypeError('Singletons must be accessed through `Instance()`.')
+
+    def __instancecheck__(self, inst):
+        return isinstance(inst, self._cls)
+
+ 
+@Singleton 
+class RESTClientImpl:
+    """
+       client to ServiceNow
+    """
+    def __init__(self, host=None, user=None, password=None, is_admin=None):
+        self.__is_admin_default = True
+
+        self.reset()
+        self.__is_admin = is_admin
+        self.__host = host
+        self.__user = user
+        self.__password = password
+
+    def reset(self):
+        self.__is_admin = None
+        self.__host = None
+        self.__user = None
+        self.__password = None
+        self.__client = None
+        self.__instance = None
+
+    @property
+    def is_admin(self):
+        if self.__is_admin is None:
+            if "SNOW_REST_IS_ADMIN" not in os.environ:
+                raise Exception("not is_admin argument nor "
+                                "SNOW_REST_IS_ADMIN found in environ")
+            self.__is_admin = True \
+                if os.environ.get("SNOW_REST_IS_ADMIN") == "1" \
+                else False
+        return self.__is_admin
+ 
+    @property
+    def host(self):
+        if self.__host is None:
+            if "SNOW_TEST_URL" not in os.environ:
+                raise Exception("not host argument nor SNOW_TEST_URL "
+                                "found in environ")
+            self.__host = os.environ.get("SNOW_TEST_URL").strip()
+        return self.__host
+
+    @property
+    def user(self):
+        if self.__user is None:
+            if "SNOW_REST_USER" not in os.environ:
+                raise Exception("not user argument nor SNOW_REST_USER "
+                                "found in environ")
+            self.__user = os.environ.get("SNOW_REST_USER")
+        return self.__user
+
+    @property
+    def password(self):
+        if self.__password is None:
+            if "SNOW_REST_PASS" not in os.environ:
+                raise Exception("not password argument nor SNOW_REST_PASS "
+                                "found in environ")
+            self.__password = os.environ.get("SNOW_REST_PASS")
+        return self.__password
+
+    @property
+    def user(self):
+        if self.__user is None:
+            if "SNOW_REST_USER" not in os.environ:
+                raise Exception("not user argument nor SNOW_REST_USER "
+                                "found in environ")
+            self.__user = os.environ.get("SNOW_REST_USER")
+        return self.__user
+
+    @property
+    def instance(self):
+        if self.__instance is None:
+            if "http" not in self.host:
+                self.__instance = urlparse(self.host).path.split(".")[0]
+            else:
+                self.__instance = urlparse(self.host).netloc.split(".")[0]
+
+        if self.__instance == "":
+            raise AssertionError(
+                "Unable to determine SNOW Instance. Verify that the "
+                "SNOW_TEST_URL environment variable been set.")
+        return self.__instance
+
+    @property
+    def client(self):
+        if self.__client is None:
+            logger.debug("init new client instance:{} user:{}".format(
+                self.instance,
+                self.user))
+            self.__client = pysnow.Client(
+                instance=self.instance,
+                user=self.user,
+                password=self.password)
+        return self.__client
+
+ 
+class RESTClient:
+    """
+       robotframework keywords
+    """
+    def __init__(self, host=None, user=None, password=None, is_admin=None):
+        RESTClientImpl.Instance(host=host, user=user, password=password, is_admin=is_admin)
+
+    def get(self):
+        RESTClientImpl.Instance()
+        return RESTClientImpl.Instance()
+
+    @keyword
+    def get_snow_instance(self):
+        return RESTClientImpl.Instance().instance
+    
+    @keyword
+    def get_snow_user(self):
+        return RESTClientImpl.Instance().user
+
+    @keyword
+    def get_snow_is_admin(self):
+        return RESTClientImpl.Instance().is_admin
+
+    @keyword
+    def snow_reset_client(self):
+        logger.info("snow_reset_client")
+        RESTClientImpl.Instance().reset()
+
+
 class RESTQuery:
     """
     This library implements keywords for retrieving current data for testing from ServiceNow. It leverages the 
@@ -43,6 +186,7 @@ class RESTQuery:
     VALID_OPERANDS = ["AND", "OR", "NQ"]
 
     def __init__(self, host=None, user=None, password=None, query_table=None, response=None):
+        RESTClientImpl.Instance(host=host, user=user, password=password)
         """
         The following arguments can be optionally provided when importing this library:
         - ``host``: The URL to your target ServiceNow instance (e.g. https://iceuat.service-now.com/). If none is provided,
@@ -55,31 +199,12 @@ class RESTQuery:
         - ``response``: Set the response object from the ServiceNow REST API (intended to be used for testing).
 
         """
-        if host is None:
-            self.host = os.environ.get("SNOW_TEST_URL").strip()
-        else:
-            self.host = host.strip()
-        if user is None:
-            self.user = os.environ.get("SNOW_REST_USER")
-        else:
-            self.user = user
-        if password is None:
-            self.password = os.environ.get("SNOW_REST_PASS")
-        else:
-            self.password = password
-        if "http" not in self.host:
-            self.instance = urlparse(self.host).path.split(".")[0]
-        else:
-            self.instance = urlparse(self.host).netloc.split(".")[0]
-        if self.instance == "":
-            raise AssertionError(
-                "Unable to determine SNOW Instance. Verify that the SNOW_TEST_URL environment variable been set.")
-        self.client = pysnow.Client(instance=self.instance, user=self.user, password=self.password)
         self.query_table = query_table
         self.query = pysnow.QueryBuilder()
         self.response = response
         self.record_count = None
         self.desired_response_fields = list()
+ 
 
     @staticmethod
     def _parse_datetime(date):
@@ -263,7 +388,8 @@ class RESTQuery:
         or no table has been defined, an error is thrown.
         """
         assert self.query_table is not None, "Query table must already be specified in this test case, but is not."
-        query_resource = self.client.resource(api_path="/table/{query_table}".format(query_table=self.query_table))
+        query_resource = RESTClientImpl.Instance().client.resource(
+            api_path="/table/{query_table}".format(query_table=self.query_table))
         try:  # Catch empty queries or errors making the request
             if self.desired_response_fields:
                 logger.info("Response fields specified in query parameters.")
@@ -431,7 +557,8 @@ class RESTQuery:
         start_dt = self._parse_datetime(start)
         end_dt = self._parse_datetime(end)
 
-        query_resource = self.client.resource(api_path="/table/{query_table}".format(query_table=self.query_table))
+        query_resource = RESTClientImpl.Instance().client.resource(
+            api_path="/table/{query_table}".format(query_table=self.query_table))
         fields = ['sys_id']
         content = query_resource.get(
             query="sys_created_onBETWEENjavascript:gs.dateGenerate('{start}')@javascript:gs.dateGenerate('{end}')".format(
@@ -449,6 +576,7 @@ class RESTInsert:
     ROBOT_LIBRARY_SCOPE = "TEST CASE"
 
     def __init__(self, host=None, user=None, password=None, insert_table=None, response=None):
+        RESTClientImpl.Instance(host=host, user=user, password=password)
 
         """The following arguments can be optionally provided when importing this library:
         - ``host``: The URL to your target ServiceNow instance (e.g. https://iceuat.service-now.com/).
@@ -462,34 +590,10 @@ class RESTInsert:
         - ``response``: Set the response object from the ServiceNow REST API (intended to be used for testing).
         """
 
-        if host is None:
-            self.host = os.environ.get("SNOW_TEST_URL").strip()
-        else:
-            self.host = host.strip()
-
-        if user is None:
-            self.user = os.environ.get("SNOW_REST_USER")
-        else:
-            self.user = user
-
-        if password is None:
-            self.password = os.environ.get("SNOW_REST_PASS")
-        else:
-            self.password = password
-
-        if "http" not in self.host:
-            self.instance = urlparse(self.host).path.split(".")[0]
-        else:
-            self.instance = urlparse(self.host).netloc.split(".")[0]
-
-        if self.instance == "":
-            raise AssertionError(
-                "Unable to determine SNOW Instance. Verify that the SNOW_TEST_URL environment variable been set.")
-
-        self.client = pysnow.Client(instance=self.instance, user=self.user, password=self.password)
+                
         self.insert_table = insert_table
         self.response = response
-
+   
     @keyword
     def insert_table_is(self, insert_table):
         """
@@ -530,7 +634,8 @@ class RESTInsert:
     def insert_record(self):
         """This keyword inserts the record in Servicenow by calling Create function from pysnow. It returns the sysid
         of the newly created record."""
-        insert_resource = self.client.resource(api_path="/table/{insert_table}".format(insert_table=self.insert_table))
+        insert_resource = RESTClientImpl.Instance().client.resource(
+            api_path="/table/{insert_table}".format(insert_table=self.insert_table))
         result = insert_resource.create(payload=self.new_record_payload)
         sys_id = result['sys_id']
         return sys_id
