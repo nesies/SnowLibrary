@@ -251,6 +251,10 @@ class RESTQuery:
         self.add_query_parameter("NONE", field.lower(), condition_type, param_1, param_2, is_date_field)
 
     @keyword
+    def get_response(self):
+        return self.response
+
+    @keyword
     def execute_query(self, multiple=False):
         """
         Executes the query that has been created with the specified conditions AND sets the response to the first record
