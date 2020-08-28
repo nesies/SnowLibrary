@@ -534,3 +534,79 @@ class RESTInsert:
         result = insert_resource.create(payload=self.new_record_payload)
         sys_id = result['sys_id']
         return sys_id
+
+
+class RESTUpdate(RESTBase):
+    """This library implements keywords for inserting records for testing in ServiceNow. It leverages the pysnow module. Keywords can be used in your test suite by importing SnowLibrary.RESTUpdate.
+    - Make sure the SNOW_REST_USER has ICE_REST_POST role in the subprod instance in which you wish to use the library and related keywords to insert a record
+    - Never use RESTInsert library and keywords with instance ice.service-now.com"""
+
+    ROBOT_LIBRARY_SCOPE = "TEST CASE"
+
+    def __init__(self, host=None, user=None, password=None, table=None, response=None):
+        RESTBase.__init__(self, host, user, password)
+
+        """The following arguments can be optionally provided when importing this library:
+        - ``host``: The URL to your target ServiceNow instance (e.g. https://iceuat.service-now.com/).
+                    If none is provided, the library will attempt to use the ``SNOW_TEST_URL`` environment variable.
+        - ``user``: The username to use when authenticating the ServiceNow REST client. This can, and *should*, be set
+                    using the ``SNOW_REST_USER`` environment variable.
+        - ``password``:  The password to use when authenticating the ServiceNow REST client. This can, and *should*, be
+                         set using the ``SNOW_REST_PASS`` environment variable.
+        - ``table``: The table to insert record into.  This can be changed or set at any time with the
+                            `Insert Table Is` keyword.
+        - ``response``: Set the response object from the ServiceNow REST API (intended to be used for testing).
+        """
+
+                
+        self.table = table
+        self.response = response
+
+    @keyword
+    def update_table_is(self, table):
+        """
+        Sets the table that will be used for the insert. It will throw an error if the table name is not found
+        in ServiceNow.
+        """
+        r = RESTQuery()
+        # a user could not have acces to table sys_db_object
+        r.query_table_is(table)
+        r.required_query_parameter_is("sys_id", "DOES NOT EQUAL", "")
+
+        r.set_limit(1)
+        r.execute_query()
+        # no exception => table exists and readable
+        self.table = table
+        logger.info("Update table is: {table}".format(table=table))
+
+    @keyword
+    def update_record_parameters(self, new_record_payload):
+        """
+        Adds the payload to the query, it accepts a dictionary type of object of key value pairs specifying values for
+        fields on the record to be inserted. It also checks for empty object and validates the fields against the specified
+        table in the earlier function."""
+        if self.table is None:
+            raise AssertionError("Insert table must already be specified in this test case, but is not")
+        elif len(new_record_payload) == 0:
+            raise AssertionError("No values specified for insert. Expected at least one argument")
+        else:
+            r2 = RESTQuery()
+            r2.query_table_is(self.table)
+            query_date =  datetime.now() - timedelta(days=7)
+            r2.required_query_parameter_is ("sys_created_on","GREATER THAN", query_date)
+            r2.execute_query()
+            for field in new_record_payload:
+                r2.get_individual_response_field(field)
+            self.payload = new_record_payload
+
+    @keyword
+    def update_record(self, sys_id):
+        """This keyword update a record in Servicenow by calling Update function from pysnow. It returns the sysid
+        of the updated record."""
+        resource = self.client.resource(api_path="/table/{table}".format(table=self.table))
+        query = {"sys_id": sys_id}
+        logger.info("user:{}".format(self.user))
+        logger.info("query:{}".format(query))
+        logger.info("payload:{}".format(self.payload))
+        result = resource.update(query=query, payload=self.payload)
+        return result.one()
