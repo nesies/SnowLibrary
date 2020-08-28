@@ -80,6 +80,9 @@ class RESTQuery:
         self.response = response
         self.record_count = None
         self.desired_response_fields = list()
+        self.sysparms = {
+            "limit": 2000,
+        }
 
     @staticmethod
     def _parse_datetime(date):
@@ -182,6 +185,23 @@ class RESTQuery:
         self.desired_response_fields = list()
 
     @keyword
+    def set_sysparm_int(self, name, value):
+        self.sysparms[name] = int(value)
+
+    @keyword
+    def set_sysparm_string(self, name, value):
+        """ sysparm string """
+        self.sysparms[name] = int(value)
+ 
+    @keyword
+    def set_sysparm_bool(self, name, value):
+        """ sysparm bool
+            - display_value
+            - exclude_reference_link
+        """
+        self.sysparms[name] = bool(value)
+
+    @keyword
     def get_record_by_sys_id(self, sys_id):
         """
         Helper method to retrieve an individual SNOW record given the sys_id. Query table must already be set.
@@ -270,12 +290,13 @@ class RESTQuery:
                 response = query_resource.get(query=self.query,
                                               stream=True,
                                               fields=self.desired_response_fields,
-                                              limit=2000)
+                                              **self.sysparms)
             else:
                 logger.info("No response fields specified in query parameters. All fields will be returned.")
+                logger.info("sysparms:{}".format(self.sysparms))
                 response = query_resource.get(query=self.query,
                                               stream=True,
-                                              limit=2000)
+                                              **self.sysparms)
         except (QueryEmpty, RequestException) as e:
             logger.error(e.args)
             self._reset_query()
